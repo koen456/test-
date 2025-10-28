@@ -313,6 +313,37 @@ elif page == "🚘 Voertuigen":
     data = data[data["Datum eerste toelating"].dt.year > 2010]
     data["Maand"] = data["Datum eerste toelating"].dt.to_period("M").dt.to_timestamp()
 
+    # --- verbetering Koen ---
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    # Lees het pickle-bestand
+    df = pd.read_pickle('Charging_data.pkl')
+    # Zorg dat 'start_time' een datetime-type is
+    df['start_time'] = pd.to_datetime(df['start_time'])
+    # Extraheer de maand (optioneel met naam i.p.v. nummer)
+    df['month'] = df['start_time'].dt.month_name()
+
+    # Bereken de gemiddelde laadduur per maand
+     avg_duration_per_month = df.groupby('month')['charging_duration'].mean()
+
+    # Sorteer maanden in kalender-volgorde
+    month_order = ['January', 'February', 'March', 'April', 'May', 'June',
+               'July', 'August', 'September', 'October', 'November', 'December']
+    avg_duration_per_month = avg_duration_per_month.reindex(month_order)
+
+    # Maak het staafdiagram
+    plt.figure(figsize=(10,6))
+    plt.bar(avg_duration_per_month.index, avg_duration_per_month.values)
+    plt.xlabel('Maand')
+    plt.ylabel('Gemiddelde laadduur (charging_duration)')
+    plt.title('Gemiddelde laadduur per maand')
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.show()
+
+
+
+
     # ---  Keuzemenu voor merken ---
     alle_merknamen = sorted(data["Merk"].unique())
     geselecteerde_merknamen = st.multiselect(
