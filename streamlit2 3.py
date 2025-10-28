@@ -263,10 +263,6 @@ elif page == "🚘 Voertuigen":
     st.markdown("---")
 
     st.title("Staafdiagram: Laadtijd (uur) en Energie (kWh)")
-    st.write(
-        "Upload je **Charging_data.pkl** of laat de app de lokale versie in dezelfde map gebruiken. "
-        "Gebruik de dropdown om alle maanden te tonen of één specifieke maand te kiezen."
-    )
 
     # --- Data inladen ---
     uploaded = st.file_uploader("Upload je Charging_data.pkl", type=["pkl", "pickle"])
