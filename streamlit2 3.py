@@ -265,17 +265,14 @@ elif page == "🚘 Voertuigen":
     st.title("Staafdiagram: Laadtijd (uur) en Energie (kWh)")
 
     # --- Data inladen ---
-    uploaded = st.file_uploader("Upload je Charging_data.pkl", type=["pkl", "pickle"])
-    if uploaded is not None:
-        df = pd.read_pickle(uploaded)
-    else:
-        default_path = Path(__file__).parent / "Charging_data.pkl"
-        if default_path.exists():
-            df = pd.read_pickle(default_path)
-            st.info("Geen upload gedetecteerd—gebruik lokale 'Charging_data.pkl' in dezelfde map.")
-        else:
-            st.warning("Upload een bestand of plaats 'Charging_data.pkl' in dezelfde map als deze app.")
-            st.stop()
+    # Laad altijd lokale dataset (geen uploader)
+    file_path = Path(__file__).parent / "Charging_data.pkl"
+    try:
+    df = pd.read_pickle(file_path)
+    except Exception as e:
+    st.error("Kan 'Charging_data.pkl' niet laden. Plaats het bestand in dezelfde map als dit script.\n\nFoutmelding: {}".format(e))
+    st.stop()
+
 
     # --- Verwachte kolommen checken / voorbereiden ---
     expected = {"start_time", "charging_duration", "energy_delivered [kWh]"}
