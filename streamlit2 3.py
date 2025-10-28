@@ -356,6 +356,7 @@ elif page == "🚘 Voertuigen":
             x=x_values, y=laadtijd,
             name="Laadtijd (uur)",
             yaxis="y1",
+            offsetgroup="laadtijd",
             hovertemplate="%{x}<br>Laadtijd: %{y:.2f} uur<extra></extra>"
         ))
         # Staaf 2: energie (y2)
@@ -363,6 +364,7 @@ elif page == "🚘 Voertuigen":
             x=x_values, y=energie,
             name="Energie (kWh)",
             yaxis="y2",
+            offsetgroup="energie",
             hovertemplate="%{x}<br>Energie: %{y:.2f} kWh<extra></extra>"
         ))
         fig.update_layout(
