@@ -294,13 +294,43 @@ elif page == "🚘 Voertuigen":
     if "exit_time" in df.columns and not np.issubdtype(df["exit_time"].dtype, np.datetime64):
         df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
 
-    # charging_duration naar uren
-    if np.issubdtype(df["charging_duration"].dtype, np.timedelta64):
-        df["laadtijd_uren"] = df["charging_duration"].dt.total_seconds() / 3600.0
-    else:
-        df["laadtijd_uren"] = pd.to_numeric(df["charging_duration"], errors="coerce") / 3600.0
+   # ---- Laadtijd in uren: eerst uit timestamps, anders fallback op charging_duration ----
+def compute_laadtijd_uren(df_in: pd.DataFrame) -> pd.Series:
+    laadtijd = pd.Series(np.nan, index=df_in.index, dtype="float64")
 
-    df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
+    # 1) Meest betrouwbaar: exit_time - start_time
+    if "start_time" in df_in.columns and "exit_time" in df_in.columns:
+        dt = (df_in["exit_time"] - df_in["start_time"])
+        if np.issubdtype(dt.dtype, np.timedelta64):
+            laadtijd_ts = dt.dt.total_seconds() / 3600.0
+            # sanity check: geen negatieve of absurd grote waardes (hier max 48 dagen)
+            laadtijd_ts = laadtijd_ts.where((laadtijd_ts >= 0) & (laadtijd_ts < 24 * 48))
+            laadtijd = laadtijd_ts
+
+    # 2) Fallback: gebruik charging_duration met simpele eenheids-detectie
+    if laadtijd.isna().all() and "charging_duration" in df_in.columns:
+        s = df_in["charging_duration"]
+        if np.issubdtype(s.dtype, np.timedelta64):
+            laadtijd_cd = s.dt.total_seconds() / 3600.0
+        else:
+            s_num = pd.to_numeric(s, errors="coerce")
+            med = np.nanmedian(s_num)
+            # Heuristiek:
+            # - mediaan > 1000  → aannemen seconden → /3600
+            # - 10 < mediaan < 1000 → aannemen minuten → /60
+            # - anders → aannemen uren
+            if med > 1000:
+                laadtijd_cd = s_num / 3600.0
+            elif 10 < med < 1000:
+                laadtijd_cd = s_num / 60.0
+            else:
+                laadtijd_cd = s_num
+        laadtijd = laadtijd.fillna(laadtijd_cd)
+
+    return laadtijd
+
+df["laadtijd_uren"] = compute_laadtijd_uren(df)
+df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
 
     # Extra tijdsdimensies
     df["jaar"] = df["start_time"].dt.year
@@ -328,32 +358,31 @@ elif page == "🚘 Voertuigen":
 
     import plotly.graph_objects as go
     def plot_bars(x_values, laadtijd, energie, x_title):
-        fig = go.Figure()
-        # Staaf 1: laadtijd (y1)
-        fig.add_trace(go.Bar(
-            x=x_values, y=laadtijd,
-            name="Laadtijd (uur)",
-            yaxis="y1",
-            hovertemplate="%{x}<br>Laadtijd: %{y:.2f} uur<extra></extra>"
-        ))
-        # Staaf 2: energie (y2)
-        fig.add_trace(go.Bar(
-            x=x_values, y=energie,
-            name="Energie (kWh)",
-            yaxis="y2",
-            opacity=0.6,
-            hovertemplate="%{x}<br>Energie: %{y:.2f} kWh<extra></extra>"
-        ))
-        fig.update_layout(
-            barmode="overlay",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            margin=dict(l=10, r=10, t=10, b=10),
-            hovermode="x unified",
-            xaxis=dict(title=x_title),
-            yaxis=dict(title="Laadtijd (uur)"),
-            yaxis2=dict(title="Energie (kWh)", overlaying="y", side="right"),
-        )
-        return fig
+    fig = go.Figure()
+    # Staaf 1: laadtijd (y1)
+    fig.add_trace(go.Bar(
+        x=x_values, y=laadtijd,
+        name="Laadtijd (uur)",
+        yaxis="y1",
+        hovertemplate="%{x}<br>Laadtijd: %{y:.2f} uur<extra></extra>"
+    ))
+    # Staaf 2: energie (y2)
+    fig.add_trace(go.Bar(
+        x=x_values, y=energie,
+        name="Energie (kWh)",
+        yaxis="y2",
+        hovertemplate="%{x}<br>Energie: %{y:.2f} kWh<extra></extra>"
+    ))
+    fig.update_layout(
+        barmode="group",  # <-- naast elkaar i.p.v. overlay
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+        margin=dict(l=10, r=10, t=10, b=10),
+        hovermode="x unified",
+        xaxis=dict(title=x_title, type="category"),
+        yaxis=dict(title="Laadtijd (uur)"),
+        yaxis2=dict(title="Energie (kWh)", overlaying="y", side="right"),
+    )
+    return fig
 
     if keuze == "Alle maanden":
         # Groepeer per maand
