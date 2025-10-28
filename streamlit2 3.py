@@ -290,40 +290,129 @@ elif page == "🚘 Voertuigen":
     if "exit_time" in df.columns and not np.issubdtype(df["exit_time"].dtype, np.datetime64):
         df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
 
-    # ---- Laadtijd in uren: eerst uit timestamps, anders fallback op charging_duration ----
-    def compute_laadtijd_uren(df_in: pd.DataFrame) -> pd.Series:
-        laadtijd = pd.Series(np.nan, index=df_in.index, dtype="float64")
+    # ---- Laadtijd in uren: ALLEEN uit 'charging_duration' met robuuste parser ----
+def parse_duration_to_hours(val) -> float:
+    import re
+    import numpy as np
+    import pandas as pd
 
-        # 1) Meest betrouwbaar: exit_time - start_time
-        if "start_time" in df_in.columns and "exit_time" in df_in.columns:
-            dt = (df_in["exit_time"] - df_in["start_time"])
-            if np.issubdtype(dt.dtype, np.timedelta64):
-                laadtijd_ts = dt.dt.total_seconds() / 3600.0
-                # sanity check: geen negatieve of absurd grote waardes (max 48 dagen)
-                laadtijd_ts = laadtijd_ts.where((laadtijd_ts >= 0) & (laadtijd_ts < 24 * 48))
-                laadtijd = laadtijd_ts
+    if val is None or (isinstance(val, float) and np.isnan(val)):
+        return np.nan
 
-        # 2) Fallback: gebruik charging_duration met eenvoudige eenheids-detectie
-        if laadtijd.isna().all() and "charging_duration" in df_in.columns:
-            s = df_in["charging_duration"]
-            if np.issubdtype(s.dtype, np.timedelta64):
-                laadtijd_cd = s.dt.total_seconds() / 3600.0
-            else:
-                s_num = pd.to_numeric(s, errors="coerce")
-                med = np.nanmedian(s_num)
-                # Heuristiek: >1000→seconden (/3600), 10..1000→minuten (/60), anders uren
-                if med > 1000:
-                    laadtijd_cd = s_num / 3600.0
-                elif 10 < med < 1000:
-                    laadtijd_cd = s_num / 60.0
-                else:
-                    laadtijd_cd = s_num
-            laadtijd = laadtijd.fillna(laadtijd_cd)
+    # Timedelta -> uren
+    if isinstance(val, pd.Timedelta):
+        hours = val.total_seconds() / 3600.0
+        return hours if 0 <= hours < 24 * 48 else np.nan  # sanity check
 
-        return laadtijd
+    # Nummers -> heuristiek (seconden/minuten/uren)
+    if isinstance(val, (int, float)) and not isinstance(val, bool):
+        x = float(val)
+        if np.isnan(x):
+            return np.nan
+        if x > 1000:     # waarschijnlijk seconden
+            hours = x / 3600.0
+        elif 10 < x < 1000:  # waarschijnlijk minuten
+            hours = x / 60.0
+        else:           # waarschijnlijk al uren
+            hours = x
+        return hours if 0 <= hours < 24 * 48 else np.nan
 
-    df["laadtijd_uren"] = compute_laadtijd_uren(df)
-    df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
+    s = str(val).strip().lower()
+
+    # Snelle normalisaties
+    s = s.replace(",", ".")
+    s = s.replace("±", "").replace("~", "").replace("≈", "")
+    s = re.sub(r"\s+", " ", s)
+
+    # Specifieke tekst-cases
+    specials = {
+        "an hour": 1.0,
+        "a hour": 1.0,
+        "one hour": 1.0,
+        "half hour": 0.5,
+        "half an hour": 0.5,
+        "half uur": 0.5,
+        "kwartier": 0.25,
+        "quarter hour": 0.25,
+        "3/4 hour": 0.75,
+        "¾ hour": 0.75,
+        "an minute": 1.0/60.0,   # zeldzaam/typo
+    }
+    if s in specials:
+        return specials[s]
+
+    # HH:MM of H:MM → uren
+    m_clock = re.match(r"^(\d{1,2}):(\d{2})$", s)
+    if m_clock:
+        h = float(m_clock.group(1))
+        m = float(m_clock.group(2))
+        hours = h + m / 60.0
+        return hours if 0 <= hours < 24 * 48 else np.nan
+
+    # ISO-8601 duration: PT#H#M#S
+    m_iso = re.match(r"^pt(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", s)
+    if m_iso:
+        h = float(m_iso.group(1) or 0)
+        m = float(m_iso.group(2) or 0)
+        sec = float(m_iso.group(3) or 0)
+        hours = h + m / 60.0 + sec / 3600.0
+        return hours if 0 <= hours < 24 * 48 else np.nan
+
+    # Algemene parser: vang combinaties als "1h 30m", "90 minutes", "2 uur 15 min", "1.5 h"
+    total_hours = 0.0
+    parts = re.findall(
+        r"(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|uur|uren|m|min|mins|minute|minutes|s|sec|secs|second|seconds)",
+        s
+    )
+    if parts:
+        for num, unit in parts:
+            v = float(num)
+            if unit in ["h", "hr", "hrs", "hour", "hours", "uur", "uren"]:
+                total_hours += v
+            elif unit in ["m", "min", "mins", "minute", "minutes"]:
+                total_hours += v / 60.0
+            elif unit in ["s", "sec", "secs", "second", "seconds"]:
+                total_hours += v / 3600.0
+        return total_hours if 0 <= total_hours < 24 * 48 else np.nan
+
+    # Enkele woorden met unit achteraan, bv. "1h", "30m"
+    m_simple = re.match(r"^(\d+(?:\.\d+)?)(h|m|s)$", s)
+    if m_simple:
+        v = float(m_simple.group(1))
+        u = m_simple.group(2)
+        if u == "h":
+            hours = v
+        elif u == "m":
+            hours = v / 60.0
+        else:  # s
+            hours = v / 3600.0
+        return hours if 0 <= hours < 24 * 48 else np.nan
+
+    # Los getal als string -> heuristiek zoals hierboven
+    try:
+        x = float(s)
+        if x > 1000:
+            hours = x / 3600.0
+        elif 10 < x < 1000:
+            hours = x / 60.0
+        else:
+            hours = x
+        return hours if 0 <= hours < 24 * 48 else np.nan
+    except Exception:
+        pass
+
+    # Onherkenbaar → NaN
+    return np.nan
+
+
+# Toepassen: alleen charging_duration gebruiken
+df["laadtijd_uren"] = df["charging_duration"].apply(parse_duration_to_hours)
+# Sanity: negatieve of extreem hoge waarden wegfilteren
+df.loc[(df["laadtijd_uren"] < 0) | (df["laadtijd_uren"] >= 24 * 48), "laadtijd_uren"] = np.nan
+
+# Energie blijft gelijk
+df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
+
 
     # Extra tijdsdimensies
     df["jaar"] = df["start_time"].dt.year
