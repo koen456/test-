@@ -258,6 +258,9 @@ if page == "⚡️ Laadpalen":
     else:
         st.warning("Kon geen landelijke data laden voor de grafiek.")
 # ------------------- Pagina 2 --------------------------
+# Zorg dat deze import bovenaan je bestand staat:
+# from pathlib import Path
+
 elif page == "🚘 Voertuigen":
     st.markdown("## 🚘 Elektrische Voertuigen & Laadtijden")
     st.markdown("---")
@@ -297,66 +300,58 @@ elif page == "🚘 Voertuigen":
         if val is None or (isinstance(val, float) and np.isnan(val)):
             return np.nan
 
-        # Timedelta -> uren
+        # 0) Directe Timedelta
         if isinstance(val, pd.Timedelta):
             hours = val.total_seconds() / 3600.0
-            return hours if 0 <= hours < 24 * 48 else np.nan  # sanity check
+            return hours if 0 <= hours < 24 * 48 else np.nan
 
-        # Nummers -> heuristiek (seconden/minuten/uren)
+        # 1) Probeer generiek met to_timedelta (dekt 'HH:MM:SS', 'X days HH:MM:SS', etc.)
+        try:
+            td = pd.to_timedelta(str(val), errors="coerce")
+            if pd.notna(td):
+                hours = td.total_seconds() / 3600.0
+                return hours if 0 <= hours < 24 * 48 else np.nan
+        except Exception:
+            pass
+
+        # 2) Getal → heuristiek (seconden/minuten/uren)
         if isinstance(val, (int, float)) and not isinstance(val, bool):
             x = float(val)
             if np.isnan(x):
                 return np.nan
-            if x > 1000:          # waarschijnlijk seconden
+            if x > 1000:         # waarschijnlijk seconden
                 hours = x / 3600.0
-            elif 10 < x < 1000:   # waarschijnlijk minuten
+            elif 10 < x < 1000:  # waarschijnlijk minuten
                 hours = x / 60.0
-            else:                 # waarschijnlijk al uren
+            else:                # waarschijnlijk uren
                 hours = x
             return hours if 0 <= hours < 24 * 48 else np.nan
 
+        # 3) Strings normaliseren en bekende woorden/parsen
         s = str(val).strip().lower()
-
-        # Snelle normalisaties
         s = s.replace(",", ".")
         s = s.replace("±", "").replace("~", "").replace("≈", "")
         s = re.sub(r"\s+", " ", s)
 
-        # Specifieke tekst-cases
+        # Speciale tekst-cases
         specials = {
-            "an hour": 1.0,
-            "a hour": 1.0,
-            "one hour": 1.0,
-            "half hour": 0.5,
-            "half an hour": 0.5,
-            "half uur": 0.5,
-            "kwartier": 0.25,
-            "quarter hour": 0.25,
-            "3/4 hour": 0.75,
-            "¾ hour": 0.75,
+            "an hour": 1.0, "a hour": 1.0, "one hour": 1.0,
+            "half hour": 0.5, "half an hour": 0.5, "half uur": 0.5,
+            "kwartier": 0.25, "quarter hour": 0.25,
+            "3/4 hour": 0.75, "¾ hour": 0.75,
+            "30 minutes": 0.5, "30 minute": 0.5, "an half hour": 0.5,
             "an minute": 1.0/60.0,
-            "30 minutes": 0.5,
-            "30 minute": 0.5,
-            "an half hour": 0.5,
         }
         if s in specials:
             return specials[s]
 
-        # HH:MM of H:MM → uren
-        m_clock = re.match(r"^(\d{1,2}):(\d{2})$", s)
-        if m_clock:
-            h = float(m_clock.group(1))
-            m = float(m_clock.group(2))
-            hours = h + m / 60.0
-            return hours if 0 <= hours < 24 * 48 else np.nan
-
-        # ISO-8601 (PT#H#M#S)
+        # ISO-8601 PT#H#M#S
         m_iso = re.match(r"^pt(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", s)
         if m_iso:
             h = float(m_iso.group(1) or 0)
             m = float(m_iso.group(2) or 0)
             sec = float(m_iso.group(3) or 0)
-            hours = h + m / 60.0 + sec / 3600.0
+            hours = h + m/60.0 + sec/3600.0
             return hours if 0 <= hours < 24 * 48 else np.nan
 
         # Combinaties als "1h 30m", "90 minutes", "2 uur 15 min"
@@ -379,12 +374,11 @@ elif page == "🚘 Voertuigen":
         # "1h" / "30m" / "90s"
         m_simple = re.match(r"^(\d+(?:\.\d+)?)(h|m|s)$", s)
         if m_simple:
-            v = float(m_simple.group(1))
-            u = m_simple.group(2)
-            hours = v if u == "h" else v / 60.0 if u == "m" else v / 3600.0
+            v = float(m_simple.group(1)); u = m_simple.group(2)
+            hours = v if u == "h" else v/60.0 if u == "m" else v/3600.0
             return hours if 0 <= hours < 24 * 48 else np.nan
 
-        # Los getal als string -> zelfde heuristiek
+        # Los getal als string → heuristiek
         try:
             x = float(s)
             if x > 1000:
@@ -395,9 +389,7 @@ elif page == "🚘 Voertuigen":
                 hours = x
             return hours if 0 <= hours < 24 * 48 else np.nan
         except Exception:
-            pass
-
-        return np.nan
+            return np.nan
 
     # Toepassen: alleen 'charging_duration' gebruiken
     df["laadtijd_uren"] = df["charging_duration"].apply(parse_duration_to_hours)
