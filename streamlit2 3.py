@@ -261,6 +261,133 @@ elif page == "🚘 Voertuigen":
     st.markdown("## 🚘 Elektrische Voertuigen & Laadtijden")
     st.markdown("---")
 
+    st.title("Staafdiagram: Laadtijd (uur) en Energie (kWh)")
+    st.write(
+        "Upload je **Charging_data.pkl** of laat de app de lokale versie in dezelfde map gebruiken. "
+        "Gebruik de dropdown om alle maanden te tonen of één specifieke maand te kiezen."
+    )
+
+    # --- Data inladen ---
+    uploaded = st.file_uploader("Upload je Charging_data.pkl", type=["pkl", "pickle"])
+    if uploaded is not None:
+        df = pd.read_pickle(uploaded)
+    else:
+        default_path = Path(__file__).parent / "Charging_data.pkl"
+        if default_path.exists():
+            df = pd.read_pickle(default_path)
+            st.info("Geen upload gedetecteerd—gebruik lokale 'Charging_data.pkl' in dezelfde map.")
+        else:
+            st.warning("Upload een bestand of plaats 'Charging_data.pkl' in dezelfde map als deze app.")
+            st.stop()
+
+    # --- Verwachte kolommen checken / voorbereiden ---
+    expected = {"start_time", "charging_duration", "energy_delivered [kWh]"}
+    missing = expected - set(df.columns)
+    if missing:
+        st.error(f"Ontbrekende kolommen in dataset: {missing}.")
+        st.stop()
+
+    # Types converteren indien nodig
+    if not np.issubdtype(df["start_time"].dtype, np.datetime64):
+        df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
+    if "exit_time" in df.columns and not np.issubdtype(df["exit_time"].dtype, np.datetime64):
+        df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
+
+    # charging_duration naar uren
+    if np.issubdtype(df["charging_duration"].dtype, np.timedelta64):
+        df["laadtijd_uren"] = df["charging_duration"].dt.total_seconds() / 3600.0
+    else:
+        df["laadtijd_uren"] = pd.to_numeric(df["charging_duration"], errors="coerce") / 3600.0
+
+    df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
+
+    # Extra tijdsdimensies
+    df["jaar"] = df["start_time"].dt.year
+    df["maand_num"] = df["start_time"].dt.month
+    df["dag"] = df["start_time"].dt.day
+
+    # Nederlandse maandnamen
+    nl_months = {
+        1: "januari", 2: "februari", 3: "maart", 4: "april", 5: "mei", 6: "juni", 7: "juli",
+        8: "augustus", 9: "september", 10: "oktober", 11: "november", 12: "december"
+    }
+
+    # Beschikbare maanden in de data (gesorteerd)
+    months_available_df = (
+        df.dropna(subset=["start_time"])
+          .sort_values(["jaar", "maand_num"])
+          .drop_duplicates(["jaar", "maand_num"])[["jaar", "maand_num"]]
+          .reset_index(drop=True)
+    )
+    month_keys = list(months_available_df.itertuples(index=False, name=None))
+    month_labels = [f"{nl_months[m]} {y}" for (y, m) in month_keys]
+
+    # --- UI: keuze alle maanden of specifieke maand ---
+    keuze = st.selectbox("Kies maand (of 'Alle maanden'):", options=["Alle maanden"] + month_labels, index=0)
+
+    import plotly.graph_objects as go
+    def plot_bars(x_values, laadtijd, energie, x_title):
+        fig = go.Figure()
+        # Staaf 1: laadtijd (y1)
+        fig.add_trace(go.Bar(
+            x=x_values, y=laadtijd,
+            name="Laadtijd (uur)",
+            yaxis="y1",
+            hovertemplate="%{x}<br>Laadtijd: %{y:.2f} uur<extra></extra>"
+        ))
+        # Staaf 2: energie (y2)
+        fig.add_trace(go.Bar(
+            x=x_values, y=energie,
+            name="Energie (kWh)",
+            yaxis="y2",
+            opacity=0.6,
+            hovertemplate="%{x}<br>Energie: %{y:.2f} kWh<extra></extra>"
+        ))
+        fig.update_layout(
+            barmode="overlay",
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+            margin=dict(l=10, r=10, t=10, b=10),
+            hovermode="x unified",
+            xaxis=dict(title=x_title),
+            yaxis=dict(title="Laadtijd (uur)"),
+            yaxis2=dict(title="Energie (kWh)", overlaying="y", side="right"),
+        )
+        return fig
+
+    if keuze == "Alle maanden":
+        # Groepeer per maand
+        grp = (df
+               .groupby(["jaar", "maand_num"], dropna=True)
+               .agg(laadtijd_uren=("laadtijd_uren", "sum"),
+                    energie_kwh=("energie_kwh", "sum"))
+               .reset_index()
+               .sort_values(["jaar", "maand_num"]))
+        x_vals = [f"{nl_months[m]} {y}" for y, m in zip(grp["jaar"], grp["maand_num"])]
+        fig = plot_bars(x_vals, grp["laadtijd_uren"], grp["energie_kwh"], x_title="Maanden")
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        # Specifieke maand gekozen
+        idx = month_labels.index(keuze)
+        year, month = month_keys[idx]
+        df_sel = df[(df["jaar"] == year) & (df["maand_num"] == month)]
+        grp = (df_sel
+               .groupby(["jaar", "maand_num", "dag"], dropna=True)
+               .agg(laadtijd_uren=("laadtijd_uren", "sum"),
+                    energie_kwh=("energie_kwh", "sum"))
+               .reset_index()
+               .sort_values(["dag"]))
+        x_vals = [str(d) for d in grp["dag"].tolist()]
+        fig = plot_bars(x_vals, grp["laadtijd_uren"], grp["energie_kwh"],
+                        x_title=f"Dagen in {nl_months[month]} {year}")
+        st.plotly_chart(fig, use_container_width=True)
+
+    # Extra: Toon een compacte tabel met de geaggregeerde waarden onder de grafiek
+    with st.expander("Toon geaggregeerde waarden"):
+        if keuze == "Alle maanden":
+            st.dataframe(grp.rename(columns={"maand_num": "maand"}))
+        else:
+            st.dataframe(grp.rename(columns={"dag": "dag van maand"}))
+
 
     #-----Grafiek Lieke------
 
