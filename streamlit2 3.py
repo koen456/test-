@@ -258,50 +258,80 @@ if page == "⚡️ Laadpalen":
         st.warning("Kon geen landelijke data laden voor de grafiek.")
 # ------------------- Pagina 2 --------------------------
 elif page == "🚘 Voertuigen":
-    st.markdown("## Elektrische Voertuigen & laadtijden")
+    st.markdown("## 🚘 Elektrische Voertuigen & laadtijden")
     st.markdown("---")
 
     import pandas as pd
-    import matplotlib.pyplot as plt
     import streamlit as st
+    import plotly.express as px
 
-    # Lees het pickle-bestand
-    df = pd.read_pickle('Charging_data.pkl')
+    # --- Data inlezen ---
+    try:
+        df = pd.read_pickle("Charging_data.pkl")
+    except FileNotFoundError:
+        st.error("❌ Het bestand 'Charging_data.pkl' is niet gevonden. Zorg dat het in de hoofdmap van je app staat.")
+        st.stop()
+    except Exception as e:
+        st.error(f"❌ Fout bij het inlezen van 'Charging_data.pkl': {e}")
+        st.stop()
 
-    # Zorg dat 'start_time' een datetime-type is
-    df['start_time'] = pd.to_datetime(df['start_time'], errors='coerce')
+    # --- Kolomcontrole ---
+    required_cols = {"start_time", "charging_duration"}
+    if not required_cols.issubset(df.columns):
+        st.error(f"❌ Het bestand mist de vereiste kolommen: {required_cols - set(df.columns)}")
+        st.stop()
 
-    # Verwijder rijen zonder geldige tijden of laadduur
-    df = df.dropna(subset=['start_time', 'charging_duration'])
+    # --- Dataverwerking ---
+    df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
+    df = df.dropna(subset=["start_time", "charging_duration"])
+    df["month"] = df["start_time"].dt.month_name()
 
-    # Extraheer maandnamen
-    df['month'] = df['start_time'].dt.month_name()
-
-    # Bereken gemiddelde laadduur per maand
+    # Gemiddelde laadduur per maand
     avg_duration_per_month = (
-        df.groupby('month')['charging_duration']
+        df.groupby("month")["charging_duration"]
         .mean()
-        .reindex(['January','February','March','April','May','June',
-                  'July','August','September','October','November','December'])
+        .reindex([
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December"
+        ])
+        .dropna()
+        .reset_index()
     )
 
-    # Verwijder maanden die leeg zijn (NaN)
-    avg_duration_per_month = avg_duration_per_month.dropna()
+    # --- Check op data ---
+    if avg_duration_per_month.empty:
+        st.warning("⚠️ Geen geldige laaddata gevonden om te visualiseren.")
+        st.stop()
 
-    # Zet index om naar string (voor de zekerheid)
-    avg_duration_per_month.index = avg_duration_per_month.index.astype(str)
+    # --- Interactieve Plotly grafiek ---
+    fig = px.bar(
+        avg_duration_per_month,
+        x="month",
+        y="charging_duration",
+        title="Gemiddelde laadduur per maand",
+        labels={"month": "Maand", "charging_duration": "Gemiddelde laadduur (uren)"},
+        color="charging_duration",
+        color_continuous_scale="Blues",
+    )
 
-    # Maak de plot
-    fig, ax = plt.subplots(figsize=(10, 6))
-    ax.bar(avg_duration_per_month.index, avg_duration_per_month.values)
-    ax.set_xlabel('Maand')
-    ax.set_ylabel('Gemiddelde laadduur (charging_duration)')
-    ax.set_title('Gemiddelde laadduur per maand')
-    plt.xticks(rotation=45)
-    plt.tight_layout()
+    fig.update_layout(
+        xaxis_tickangle=-45,
+        plot_bgcolor="white",
+        paper_bgcolor="white",
+        title_font_size=18,
+        xaxis_title_font_size=14,
+        yaxis_title_font_size=14,
+    )
 
-    # Toon in Streamlit
-    st.pyplot(fig)
+    # --- Toon grafiek ---
+    st.plotly_chart(fig, use_container_width=True)
+
+    # --- Extra info ---
+    st.markdown(
+        """
+        📊 *Deze grafiek toont de gemiddelde laadtijd per maand, berekend op basis van alle geregistreerde laadsessies.*
+        """
+    )
 
 
 
