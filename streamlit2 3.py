@@ -264,8 +264,7 @@ elif page == "🚘 Voertuigen":
 
     st.title("Staafdiagram: Laadtijd (uur) en Energie (kWh)")
 
-    # --- Data inladen ---
-    # Laad altijd lokale dataset (geen uploader)
+    # --- Data inladen (altijd lokaal, geen uploader) ---
     file_path = Path(__file__).parent / "Charging_data.pkl"
     try:
         df = pd.read_pickle(file_path)
@@ -275,7 +274,6 @@ elif page == "🚘 Voertuigen":
             f"Foutmelding: {e}"
         )
         st.stop()
-
 
     # --- Verwachte kolommen checken / voorbereiden ---
     expected = {"start_time", "charging_duration", "energy_delivered [kWh]"}
@@ -291,128 +289,123 @@ elif page == "🚘 Voertuigen":
         df["exit_time"] = pd.to_datetime(df["exit_time"], errors="coerce")
 
     # ---- Laadtijd in uren: ALLEEN uit 'charging_duration' met robuuste parser ----
-def parse_duration_to_hours(val) -> float:
-    import re
-    import numpy as np
-    import pandas as pd
+    def parse_duration_to_hours(val) -> float:
+        import re
+        import numpy as np
+        import pandas as pd
 
-    if val is None or (isinstance(val, float) and np.isnan(val)):
+        if val is None or (isinstance(val, float) and np.isnan(val)):
+            return np.nan
+
+        # Timedelta -> uren
+        if isinstance(val, pd.Timedelta):
+            hours = val.total_seconds() / 3600.0
+            return hours if 0 <= hours < 24 * 48 else np.nan  # sanity check
+
+        # Nummers -> heuristiek (seconden/minuten/uren)
+        if isinstance(val, (int, float)) and not isinstance(val, bool):
+            x = float(val)
+            if np.isnan(x):
+                return np.nan
+            if x > 1000:          # waarschijnlijk seconden
+                hours = x / 3600.0
+            elif 10 < x < 1000:   # waarschijnlijk minuten
+                hours = x / 60.0
+            else:                 # waarschijnlijk al uren
+                hours = x
+            return hours if 0 <= hours < 24 * 48 else np.nan
+
+        s = str(val).strip().lower()
+
+        # Snelle normalisaties
+        s = s.replace(",", ".")
+        s = s.replace("±", "").replace("~", "").replace("≈", "")
+        s = re.sub(r"\s+", " ", s)
+
+        # Specifieke tekst-cases
+        specials = {
+            "an hour": 1.0,
+            "a hour": 1.0,
+            "one hour": 1.0,
+            "half hour": 0.5,
+            "half an hour": 0.5,
+            "half uur": 0.5,
+            "kwartier": 0.25,
+            "quarter hour": 0.25,
+            "3/4 hour": 0.75,
+            "¾ hour": 0.75,
+            "an minute": 1.0/60.0,
+            "30 minutes": 0.5,
+            "30 minute": 0.5,
+            "an half hour": 0.5,
+        }
+        if s in specials:
+            return specials[s]
+
+        # HH:MM of H:MM → uren
+        m_clock = re.match(r"^(\d{1,2}):(\d{2})$", s)
+        if m_clock:
+            h = float(m_clock.group(1))
+            m = float(m_clock.group(2))
+            hours = h + m / 60.0
+            return hours if 0 <= hours < 24 * 48 else np.nan
+
+        # ISO-8601 (PT#H#M#S)
+        m_iso = re.match(r"^pt(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", s)
+        if m_iso:
+            h = float(m_iso.group(1) or 0)
+            m = float(m_iso.group(2) or 0)
+            sec = float(m_iso.group(3) or 0)
+            hours = h + m / 60.0 + sec / 3600.0
+            return hours if 0 <= hours < 24 * 48 else np.nan
+
+        # Combinaties als "1h 30m", "90 minutes", "2 uur 15 min"
+        total_hours = 0.0
+        parts = re.findall(
+            r"(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|uur|uren|m|min|mins|minute|minutes|s|sec|secs|second|seconds)",
+            s
+        )
+        if parts:
+            for num, unit in parts:
+                v = float(num)
+                if unit in ["h", "hr", "hrs", "hour", "hours", "uur", "uren"]:
+                    total_hours += v
+                elif unit in ["m", "min", "mins", "minute", "minutes"]:
+                    total_hours += v / 60.0
+                elif unit in ["s", "sec", "secs", "second", "seconds"]:
+                    total_hours += v / 3600.0
+            return total_hours if 0 <= total_hours < 24 * 48 else np.nan
+
+        # "1h" / "30m" / "90s"
+        m_simple = re.match(r"^(\d+(?:\.\d+)?)(h|m|s)$", s)
+        if m_simple:
+            v = float(m_simple.group(1))
+            u = m_simple.group(2)
+            hours = v if u == "h" else v / 60.0 if u == "m" else v / 3600.0
+            return hours if 0 <= hours < 24 * 48 else np.nan
+
+        # Los getal als string -> zelfde heuristiek
+        try:
+            x = float(s)
+            if x > 1000:
+                hours = x / 3600.0
+            elif 10 < x < 1000:
+                hours = x / 60.0
+            else:
+                hours = x
+            return hours if 0 <= hours < 24 * 48 else np.nan
+        except Exception:
+            pass
+
         return np.nan
 
-    # Timedelta -> uren
-    if isinstance(val, pd.Timedelta):
-        hours = val.total_seconds() / 3600.0
-        return hours if 0 <= hours < 24 * 48 else np.nan  # sanity check
+    # Toepassen: alleen 'charging_duration' gebruiken
+    df["laadtijd_uren"] = df["charging_duration"].apply(parse_duration_to_hours)
+    # Sanity: negatieve of extreme waarden verwijderen
+    df.loc[(df["laadtijd_uren"] < 0) | (df["laadtijd_uren"] >= 24 * 48), "laadtijd_uren"] = np.nan
 
-    # Nummers -> heuristiek (seconden/minuten/uren)
-    if isinstance(val, (int, float)) and not isinstance(val, bool):
-        x = float(val)
-        if np.isnan(x):
-            return np.nan
-        if x > 1000:     # waarschijnlijk seconden
-            hours = x / 3600.0
-        elif 10 < x < 1000:  # waarschijnlijk minuten
-            hours = x / 60.0
-        else:           # waarschijnlijk al uren
-            hours = x
-        return hours if 0 <= hours < 24 * 48 else np.nan
-
-    s = str(val).strip().lower()
-
-    # Snelle normalisaties
-    s = s.replace(",", ".")
-    s = s.replace("±", "").replace("~", "").replace("≈", "")
-    s = re.sub(r"\s+", " ", s)
-
-    # Specifieke tekst-cases
-    specials = {
-        "an hour": 1.0,
-        "a hour": 1.0,
-        "one hour": 1.0,
-        "half hour": 0.5,
-        "half an hour": 0.5,
-        "half uur": 0.5,
-        "kwartier": 0.25,
-        "quarter hour": 0.25,
-        "3/4 hour": 0.75,
-        "¾ hour": 0.75,
-        "an minute": 1.0/60.0,   # zeldzaam/typo
-    }
-    if s in specials:
-        return specials[s]
-
-    # HH:MM of H:MM → uren
-    m_clock = re.match(r"^(\d{1,2}):(\d{2})$", s)
-    if m_clock:
-        h = float(m_clock.group(1))
-        m = float(m_clock.group(2))
-        hours = h + m / 60.0
-        return hours if 0 <= hours < 24 * 48 else np.nan
-
-    # ISO-8601 duration: PT#H#M#S
-    m_iso = re.match(r"^pt(?:(\d+)h)?(?:(\d+)m)?(?:(\d+)s)?$", s)
-    if m_iso:
-        h = float(m_iso.group(1) or 0)
-        m = float(m_iso.group(2) or 0)
-        sec = float(m_iso.group(3) or 0)
-        hours = h + m / 60.0 + sec / 3600.0
-        return hours if 0 <= hours < 24 * 48 else np.nan
-
-    # Algemene parser: vang combinaties als "1h 30m", "90 minutes", "2 uur 15 min", "1.5 h"
-    total_hours = 0.0
-    parts = re.findall(
-        r"(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|uur|uren|m|min|mins|minute|minutes|s|sec|secs|second|seconds)",
-        s
-    )
-    if parts:
-        for num, unit in parts:
-            v = float(num)
-            if unit in ["h", "hr", "hrs", "hour", "hours", "uur", "uren"]:
-                total_hours += v
-            elif unit in ["m", "min", "mins", "minute", "minutes"]:
-                total_hours += v / 60.0
-            elif unit in ["s", "sec", "secs", "second", "seconds"]:
-                total_hours += v / 3600.0
-        return total_hours if 0 <= total_hours < 24 * 48 else np.nan
-
-    # Enkele woorden met unit achteraan, bv. "1h", "30m"
-    m_simple = re.match(r"^(\d+(?:\.\d+)?)(h|m|s)$", s)
-    if m_simple:
-        v = float(m_simple.group(1))
-        u = m_simple.group(2)
-        if u == "h":
-            hours = v
-        elif u == "m":
-            hours = v / 60.0
-        else:  # s
-            hours = v / 3600.0
-        return hours if 0 <= hours < 24 * 48 else np.nan
-
-    # Los getal als string -> heuristiek zoals hierboven
-    try:
-        x = float(s)
-        if x > 1000:
-            hours = x / 3600.0
-        elif 10 < x < 1000:
-            hours = x / 60.0
-        else:
-            hours = x
-        return hours if 0 <= hours < 24 * 48 else np.nan
-    except Exception:
-        pass
-
-    # Onherkenbaar → NaN
-    return np.nan
-
-
-# Toepassen: alleen charging_duration gebruiken
-df["laadtijd_uren"] = df["charging_duration"].apply(parse_duration_to_hours)
-# Sanity: negatieve of extreem hoge waarden wegfilteren
-df.loc[(df["laadtijd_uren"] < 0) | (df["laadtijd_uren"] >= 24 * 48), "laadtijd_uren"] = np.nan
-
-# Energie blijft gelijk
-df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
-
+    # Energie (ongewijzigd)
+    df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
 
     # Extra tijdsdimensies
     df["jaar"] = df["start_time"].dt.year
@@ -438,26 +431,33 @@ df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
     # --- UI: keuze alle maanden of specifieke maand ---
     keuze = st.selectbox("Kies maand (of 'Alle maanden'):", options=["Alle maanden"] + month_labels, index=0)
 
+    # --- Plot functie: staven naast elkaar (barmode='group') + 2 y-assen ---
     def plot_bars(x_values, laadtijd, energie, x_title):
         fig = go.Figure()
-        # Staaf 1: laadtijd (y1)
+
+        # Staaf 1: laadtijd (linker y-as)
         fig.add_trace(go.Bar(
-            x=x_values, y=laadtijd,
+            x=x_values,
+            y=laadtijd,
             name="Laadtijd (uur)",
-            yaxis="y1",
+            yaxis="y",
             offsetgroup="laadtijd",
-            hovertemplate="%{x}<br>Laadtijd: %{y:.2f} uur<extra></extra>"
+            hovertemplate="%{x}<br>Laadtijd: %{y:.2f} uur<extra></extra>",
         ))
-        # Staaf 2: energie (y2)
+
+        # Staaf 2: energie (rechter y-as)
         fig.add_trace(go.Bar(
-            x=x_values, y=energie,
+            x=x_values,
+            y=energie,
             name="Energie (kWh)",
             yaxis="y2",
             offsetgroup="energie",
-            hovertemplate="%{x}<br>Energie: %{y:.2f} kWh<extra></extra>"
+            hovertemplate="%{x}<br>Energie: %{y:.2f} kWh<extra></extra>",
         ))
+
         fig.update_layout(
-            barmode="group",  # naast elkaar
+            barmode="group",
+            bargap=0.15,
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
             margin=dict(l=10, r=10, t=10, b=10),
             hovermode="x unified",
@@ -469,12 +469,16 @@ df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
 
     if keuze == "Alle maanden":
         # Groepeer per maand
-        grp = (df
-               .groupby(["jaar", "maand_num"], dropna=True)
-               .agg(laadtijd_uren=("laadtijd_uren", "sum"),
-                    energie_kwh=("energie_kwh", "sum"))
-               .reset_index()
-               .sort_values(["jaar", "maand_num"]))
+        grp = (
+            df
+            .groupby(["jaar", "maand_num"], dropna=True)
+            .agg(
+                laadtijd_uren=("laadtijd_uren", "sum"),
+                energie_kwh=("energie_kwh", "sum"),
+            )
+            .reset_index()
+            .sort_values(["jaar", "maand_num"])
+        )
         x_vals = [f"{nl_months[m]} {y}" for y, m in zip(grp["jaar"], grp["maand_num"])]
         fig = plot_bars(x_vals, grp["laadtijd_uren"], grp["energie_kwh"], x_title="Maanden")
         st.plotly_chart(fig, use_container_width=True)
@@ -483,15 +487,18 @@ df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
         idx = month_labels.index(keuze)
         year, month = month_keys[idx]
         df_sel = df[(df["jaar"] == year) & (df["maand_num"] == month)]
-        grp = (df_sel
-               .groupby(["jaar", "maand_num", "dag"], dropna=True)
-               .agg(laadtijd_uren=("laadtijd_uren", "sum"),
-                    energie_kwh=("energie_kwh", "sum"))
-               .reset_index()
-               .sort_values(["dag"]))
+        grp = (
+            df_sel
+            .groupby(["jaar", "maand_num", "dag"], dropna=True)
+            .agg(
+                laadtijd_uren=("laadtijd_uren", "sum"),
+                energie_kwh=("energie_kwh", "sum"),
+            )
+            .reset_index()
+            .sort_values(["dag"])
+        )
         x_vals = [str(d) for d in grp["dag"].tolist()]
-        fig = plot_bars(x_vals, grp["laadtijd_uren"], grp["energie_kwh"],
-                        x_title=f"Dagen in {nl_months[month]} {year}")
+        fig = plot_bars(x_vals, grp["laadtijd_uren"], grp["energie_kwh"], x_title=f"Dagen in {nl_months[month]} {year}")
         st.plotly_chart(fig, use_container_width=True)
 
     # Extra: Toon een compacte tabel met de geaggregeerde waarden onder de grafiek
@@ -500,6 +507,7 @@ df["energie_kwh"] = pd.to_numeric(df["energy_delivered [kWh]"], errors="coerce")
             st.dataframe(grp.rename(columns={"maand_num": "maand"}))
         else:
             st.dataframe(grp.rename(columns={"dag": "dag van maand"}))
+
 
 
     #-----Grafiek Lieke------
