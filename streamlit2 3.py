@@ -268,10 +268,13 @@ elif page == "🚘 Voertuigen":
     # Laad altijd lokale dataset (geen uploader)
     file_path = Path(__file__).parent / "Charging_data.pkl"
     try:
-    df = pd.read_pickle(file_path)
+        df = pd.read_pickle(file_path)
     except Exception as e:
-    st.error("Kan 'Charging_data.pkl' niet laden. Plaats het bestand in dezelfde map als dit script.\n\nFoutmelding: {}".format(e))
-    st.stop()
+        st.error(
+            "Kan 'Charging_data.pkl' niet laden. Plaats het bestand in dezelfde map als dit script.\n\n"
+            f"Foutmelding: {e}"
+        )
+        st.stop()
 
 
     # --- Verwachte kolommen checken / voorbereiden ---
