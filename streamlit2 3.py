@@ -257,7 +257,9 @@ if page == "⚡️ Laadpalen":
     else:
         st.warning("Kon geen landelijke data laden voor de grafiek.")
 # ------------------- Pagina 2 --------------------------
-
+elif page == "🚘 Voertuigen":
+    st.markdown("## 🚘 Elektrische Voertuigen & laadtijden")
+    st.markdown("---")
 
     #-----Grafiek Lieke------
 
