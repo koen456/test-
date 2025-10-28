@@ -261,8 +261,6 @@ elif page == "🚘 Voertuigen":
     st.markdown("## Elektrische Voertuigen & laadtijden")
     st.markdown("---")
 
-    # --- verbetering Koen ---
-
     import pandas as pd
     import matplotlib.pyplot as plt
     import streamlit as st
@@ -271,20 +269,29 @@ elif page == "🚘 Voertuigen":
     df = pd.read_pickle('Charging_data.pkl')
 
     # Zorg dat 'start_time' een datetime-type is
-    df['start_time'] = pd.to_datetime(df['start_time'])
+    df['start_time'] = pd.to_datetime(df['start_time'], errors='coerce')
 
-    # Extraheer de maandnaam
+    # Verwijder rijen zonder geldige tijden of laadduur
+    df = df.dropna(subset=['start_time', 'charging_duration'])
+
+    # Extraheer maandnamen
     df['month'] = df['start_time'].dt.month_name()
 
-    # Bereken de gemiddelde laadduur per maand
-    avg_duration_per_month = df.groupby('month')['charging_duration'].mean()
+    # Bereken gemiddelde laadduur per maand
+    avg_duration_per_month = (
+        df.groupby('month')['charging_duration']
+        .mean()
+        .reindex(['January','February','March','April','May','June',
+                  'July','August','September','October','November','December'])
+    )
 
-    # Sorteer de maanden op kalender-volgorde
-    month_order = ['January', 'February', 'March', 'April', 'May', 'June',
-                   'July', 'August', 'September', 'October', 'November', 'December']
-    avg_duration_per_month = avg_duration_per_month.reindex(month_order)
+    # Verwijder maanden die leeg zijn (NaN)
+    avg_duration_per_month = avg_duration_per_month.dropna()
 
-    # Maak het staafdiagram
+    # Zet index om naar string (voor de zekerheid)
+    avg_duration_per_month.index = avg_duration_per_month.index.astype(str)
+
+    # Maak de plot
     fig, ax = plt.subplots(figsize=(10, 6))
     ax.bar(avg_duration_per_month.index, avg_duration_per_month.values)
     ax.set_xlabel('Maand')
@@ -293,7 +300,7 @@ elif page == "🚘 Voertuigen":
     plt.xticks(rotation=45)
     plt.tight_layout()
 
-    # Toon het diagram in Streamlit
+    # Toon in Streamlit
     st.pyplot(fig)
 
 
