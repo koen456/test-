@@ -264,6 +264,7 @@ elif page == "🚘 Voertuigen":
     import pandas as pd
     import streamlit as st
     import plotly.express as px
+    import re
 
     # --- Data inlezen ---
     try:
@@ -281,14 +282,50 @@ elif page == "🚘 Voertuigen":
         st.error(f"❌ Het bestand mist de vereiste kolommen: {required_cols - set(df.columns)}")
         st.stop()
 
-    # --- Dataverwerking ---
+    # --- 'start_time' omzetten naar datetime ---
     df["start_time"] = pd.to_datetime(df["start_time"], errors="coerce")
-    df = df.dropna(subset=["start_time", "charging_duration"])
+
+    # --- Functie: laadduur omzetten naar uren ---
+    def parse_duration_to_hours(value):
+        if pd.isna(value):
+            return None
+        value = str(value).lower().strip()
+
+        # Zoeken naar getallen + eenheid
+        if "hour" in value:
+            match = re.search(r"(\d+(\.\d+)?)", value)
+            if match:
+                return float(match.group(1))
+            elif "an hour" in value:
+                return 1.0
+            else:
+                return None
+        elif "minute" in value:
+            match = re.search(r"(\d+(\.\d+)?)", value)
+            if match:
+                minutes = float(match.group(1))
+                return minutes / 60
+        elif "second" in value:
+            match = re.search(r"(\d+(\.\d+)?)", value)
+            if match:
+                seconds = float(match.group(1))
+                return seconds / 3600
+        elif value.isnumeric():
+            return float(value)
+        return None
+
+    # --- Converteer kolom ---
+    df["charging_duration_hours"] = df["charging_duration"].apply(parse_duration_to_hours)
+
+    # --- Onbruikbare of lege rijen verwijderen ---
+    df = df.dropna(subset=["start_time", "charging_duration_hours"])
+
+    # --- Maand extraheren ---
     df["month"] = df["start_time"].dt.month_name()
 
-    # Gemiddelde laadduur per maand
+    # --- Gemiddelde laadduur per maand ---
     avg_duration_per_month = (
-        df.groupby("month")["charging_duration"]
+        df.groupby("month")["charging_duration_hours"]
         .mean()
         .reindex([
             "January", "February", "March", "April", "May", "June",
@@ -303,14 +340,14 @@ elif page == "🚘 Voertuigen":
         st.warning("⚠️ Geen geldige laaddata gevonden om te visualiseren.")
         st.stop()
 
-    # --- Interactieve Plotly grafiek ---
+    # --- Interactieve Plotly-grafiek ---
     fig = px.bar(
         avg_duration_per_month,
         x="month",
-        y="charging_duration",
+        y="charging_duration_hours",
         title="Gemiddelde laadduur per maand",
-        labels={"month": "Maand", "charging_duration": "Gemiddelde laadduur (uren)"},
-        color="charging_duration",
+        labels={"month": "Maand", "charging_duration_hours": "Gemiddelde laadduur (uren)"},
+        color="charging_duration_hours",
         color_continuous_scale="Blues",
     )
 
@@ -329,10 +366,9 @@ elif page == "🚘 Voertuigen":
     # --- Extra info ---
     st.markdown(
         """
-        📊 *Deze grafiek toont de gemiddelde laadtijd per maand, berekend op basis van alle geregistreerde laadsessies.*
+        📊 *Deze grafiek toont de gemiddelde laadtijd per maand (in uren), automatisch omgerekend uit tekstuele waarden zoals "7 hours" of "45 minutes".*
         """
     )
-
 
 
     #-----Grafiek Lieke------
