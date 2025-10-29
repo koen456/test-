@@ -499,182 +499,177 @@ elif page == "🚘 Voertuigen":
             st.dataframe(grp.rename(columns={"maand_num": "maand"}))
         else:
             st.dataframe(grp.rename(columns={"dag": "dag van maand"}))
+
     # =======================
-# 📅 Vergelijk 2 dagen
-# =======================
-st.markdown("### 📅 Vergelijk twee dagen")
+    # 📅 Vergelijk 2 dagen
+    # =======================
+    st.markdown("### 📅 Vergelijk twee dagen")
 
-# Zorg voor een datumkolom (alleen datum, geen tijd)
-df["datum"] = df["start_time"].dt.date
+    # Zorg voor een datumkolom (alleen datum, geen tijd)
+    df["datum"] = df["start_time"].dt.date
 
-# Beschikbare datums bepalen en netjes sorteren
-available_dates = sorted(d for d in df["datum"].dropna().unique())
+    # Beschikbare datums bepalen en netjes sorteren
+    available_dates = sorted(d for d in df["datum"].dropna().unique())
 
-if len(available_dates) < 2:
-    st.info("Er zijn minder dan twee dagen met data om te vergelijken.")
-else:
-    # Handige standaardkeuze: laatste twee dagen in de data
-    default_d1 = available_dates[-2]
-    default_d2 = available_dates[-1]
-
-    c1, c2, c3 = st.columns([1, 1, 2])
-    with c1:
-        dag1 = st.date_input(
-            "Dag 1",
-            value=default_d1,
-            min_value=available_dates[0],
-            max_value=available_dates[-1],
-            format="YYYY-MM-DD",
-            key="compare_day1",
-        )
-    with c2:
-        dag2 = st.date_input(
-            "Dag 2",
-            value=default_d2,
-            min_value=available_dates[0],
-            max_value=available_dates[-1],
-            format="YYYY-MM-DD",
-            key="compare_day2",
-        )
-
-    # Filter data voor de gekozen dagen
-    keuze_dagen = [dag1, dag2]
-    df_sel = df[df["datum"].isin(keuze_dagen)].copy()
-
-    if df_sel.empty or len(set(keuze_dagen)) < 2:
-        st.warning("Kies twee verschillende dagen met beschikbare data.")
+    if len(available_dates) < 2:
+        st.info("Er zijn minder dan twee dagen met data om te vergelijken.")
     else:
-        # Aggregatie per dag
-        dag_agg = (
-            df_sel.groupby("datum", dropna=True)
-            .agg(
-                laadtijd_uren=("laadtijd_uren", "sum"),
-                energie_kwh=("energie_kwh", "sum"),
-                sessies=("energie_kwh", "count"),
+        # Handige standaardkeuze: laatste twee dagen in de data
+        default_d1 = available_dates[-2]
+        default_d2 = available_dates[-1]
+
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            dag1 = st.date_input(
+                "Dag 1",
+                value=default_d1,
+                min_value=available_dates[0],
+                max_value=available_dates[-1],
+                format="YYYY-MM-DD",
+                key="compare_day1",
             )
-            .reset_index()
-        )
-
-        # Tabel tonen
-        st.dataframe(
-            dag_agg.rename(
-                columns={
-                    "datum": "Datum",
-                    "laadtijd_uren": "Laadtijd (uur)",
-                    "energie_kwh": "Energie (kWh)",
-                    "sessies": "Aantal sessies",
-                }
-            ),
-            use_container_width=True,
-        )
-
-        # ---- Grafiek: Dag-vergelijking (staven naast elkaar) ----
-        import plotly.graph_objects as go
-
-        # X-as zijn de metriek-namen; per metriek 2 staven (dag1 & dag2)
-        metrics = ["Laadtijd (uur)", "Energie (kWh)", "Aantal sessies"]
-        # Waarden voor elke dag in dezelfde volgorde als 'metrics'
-        def vals_for_day(d):
-            row = dag_agg.loc[dag_agg["datum"] == d]
-            if row.empty:
-                return [0, 0, 0]
-            return [
-                float(row["laadtijd_uren"].iloc[0] or 0),
-                float(row["energie_kwh"].iloc[0] or 0),
-                float(row["sessies"].iloc[0] or 0),
-            ]
-
-        y_d1 = vals_for_day(dag1)
-        y_d2 = vals_for_day(dag2)
-
-        fig_cmp = go.Figure()
-        fig_cmp.add_trace(
-            go.Bar(
-                x=metrics,
-                y=y_d1,
-                name=str(dag1),
-                offsetgroup="d1",
-                hovertemplate="%{x}<br>%{y:.2f}<extra>" + str(dag1) + "</extra>",
+        with c2:
+            dag2 = st.date_input(
+                "Dag 2",
+                value=default_d2,
+                min_value=available_dates[0],
+                max_value=available_dates[-1],
+                format="YYYY-MM-DD",
+                key="compare_day2",
             )
-        )
-        fig_cmp.add_trace(
-            go.Bar(
-                x=metrics,
-                y=y_d2,
-                name=str(dag2),
-                offsetgroup="d2",
-                hovertemplate="%{x}<br>%{y:.2f}<extra>" + str(dag2) + "</extra>",
-            )
-        )
-        fig_cmp.update_layout(
-            barmode="group",
-            bargap=0.15,
-            title="Vergelijking per metriek",
-            xaxis_title="Metriek",
-            yaxis_title="Waarde",
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
-            margin=dict(l=10, r=10, t=30, b=10),
-            hovermode="x unified",
-        )
-        st.plotly_chart(fig_cmp, use_container_width=True)
 
-        # (Optioneel) Detail: lijn/staaf per uur binnen de twee dagen
-        with st.expander("Detail: per uur binnen de twee dagen"):
-            df_detail = df_sel.copy()
-            df_detail["uur"] = df_detail["start_time"].dt.hour
+        # Filter data voor de gekozen dagen
+        keuze_dagen = [dag1, dag2]
+        df_sel = df[df["datum"].isin(keuze_dagen)].copy()
 
-            per_uur = (
-                df_detail.groupby(["datum", "uur"])
+        if df_sel.empty or len(set(keuze_dagen)) < 2:
+            st.warning("Kies twee verschillende dagen met beschikbare data.")
+        else:
+            # Aggregatie per dag
+            dag_agg = (
+                df_sel.groupby("datum", dropna=True)
                 .agg(
                     laadtijd_uren=("laadtijd_uren", "sum"),
                     energie_kwh=("energie_kwh", "sum"),
+                    sessies=("energie_kwh", "count"),
                 )
                 .reset_index()
-                .sort_values(["datum", "uur"])
             )
 
-            # Twee subplot-achtige figuren apart tonen (één voor laadtijd, één voor energie)
-            fig_uur_lt = go.Figure()
-            for d in keuze_dagen:
-                ddata = per_uur[per_uur["datum"] == d]
-                fig_uur_lt.add_trace(
-                    go.Scatter(
-                        x=ddata["uur"],
-                        y=ddata["laadtijd_uren"],
-                        mode="lines+markers",
-                        name=f"Laadtijd - {d}",
-                    )
+            # Tabel tonen
+            st.dataframe(
+                dag_agg.rename(
+                    columns={
+                        "datum": "Datum",
+                        "laadtijd_uren": "Laadtijd (uur)",
+                        "energie_kwh": "Energie (kWh)",
+                        "sessies": "Aantal sessies",
+                    }
+                ),
+                use_container_width=True,
+            )
+
+            # ---- Grafiek: Dag-vergelijking (staven naast elkaar) ----
+            metrics = ["Laadtijd (uur)", "Energie (kWh)", "Aantal sessies"]
+
+            def vals_for_day(d):
+                row = dag_agg.loc[dag_agg["datum"] == d]
+                if row.empty:
+                    return [0, 0, 0]
+                return [
+                    float(row["laadtijd_uren"].iloc[0] or 0),
+                    float(row["energie_kwh"].iloc[0] or 0),
+                    float(row["sessies"].iloc[0] or 0),
+                ]
+
+            y_d1 = vals_for_day(dag1)
+            y_d2 = vals_for_day(dag2)
+
+            fig_cmp = go.Figure()
+            fig_cmp.add_trace(
+                go.Bar(
+                    x=metrics,
+                    y=y_d1,
+                    name=str(dag1),
+                    offsetgroup="d1",
+                    hovertemplate="%{x}<br>%{y:.2f}<extra>" + str(dag1) + "</extra>",
                 )
-            fig_uur_lt.update_layout(
-                title="Laadtijd per uur",
-                xaxis_title="Uur van de dag",
-                yaxis_title="Laadtijd (uur)",
-                hovermode="x unified",
-                margin=dict(l=10, r=10, t=30, b=10),
             )
-            st.plotly_chart(fig_uur_lt, use_container_width=True)
-
-            fig_uur_en = go.Figure()
-            for d in keuze_dagen:
-                ddata = per_uur[per_uur["datum"] == d]
-                fig_uur_en.add_trace(
-                    go.Scatter(
-                        x=ddata["uur"],
-                        y=ddata["energie_kwh"],
-                        mode="lines+markers",
-                        name=f"Energie - {d}",
-                    )
+            fig_cmp.add_trace(
+                go.Bar(
+                    x=metrics,
+                    y=y_d2,
+                    name=str(dag2),
+                    offsetgroup="d2",
+                    hovertemplate="%{x}<br>%{y:.2f}<extra>" + str(dag2) + "</extra>",
                 )
-            fig_uur_en.update_layout(
-                title="Energie per uur",
-                xaxis_title="Uur van de dag",
-                yaxis_title="Energie (kWh)",
-                hovermode="x unified",
-                margin=dict(l=10, r=10, t=30, b=10),
             )
-            st.plotly_chart(fig_uur_en, use_container_width=True)
+            fig_cmp.update_layout(
+                barmode="group",
+                bargap=0.15,
+                title="Vergelijking per metriek",
+                xaxis_title="Metriek",
+                yaxis_title="Waarde",
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
+                margin=dict(l=10, r=10, t=30, b=10),
+                hovermode="x unified",
+            )
+            st.plotly_chart(fig_cmp, use_container_width=True)
 
+            # (Optioneel) Detail: per uur binnen de twee dagen
+            with st.expander("Detail: per uur binnen de twee dagen"):
+                df_detail = df_sel.copy()
+                df_detail["uur"] = df_detail["start_time"].dt.hour
 
+                per_uur = (
+                    df_detail.groupby(["datum", "uur"])
+                    .agg(
+                        laadtijd_uren=("laadtijd_uren", "sum"),
+                        energie_kwh=("energie_kwh", "sum"),
+                    )
+                    .reset_index()
+                    .sort_values(["datum", "uur"])
+                )
+
+                fig_uur_lt = go.Figure()
+                for d in keuze_dagen:
+                    ddata = per_uur[per_uur["datum"] == d]
+                    fig_uur_lt.add_trace(
+                        go.Scatter(
+                            x=ddata["uur"],
+                            y=ddata["laadtijd_uren"],
+                            mode="lines+markers",
+                            name=f"Laadtijd - {d}",
+                        )
+                    )
+                fig_uur_lt.update_layout(
+                    title="Laadtijd per uur",
+                    xaxis_title="Uur van de dag",
+                    yaxis_title="Laadtijd (uur)",
+                    hovermode="x unified",
+                    margin=dict(l=10, r=10, t=30, b=10),
+                )
+                st.plotly_chart(fig_uur_lt, use_container_width=True)
+
+                fig_uur_en = go.Figure()
+                for d in keuze_dagen:
+                    ddata = per_uur[per_uur["datum"] == d]
+                    fig_uur_en.add_trace(
+                        go.Scatter(
+                            x=ddata["uur"],
+                            y=ddata["energie_kwh"],
+                            mode="lines+markers",
+                            name=f"Energie - {d}",
+                        )
+                    )
+                fig_uur_en.update_layout(
+                    title="Energie per uur",
+                    xaxis_title="Uur van de dag",
+                    yaxis_title="Energie (kWh)",
+                    hovermode="x unified",
+                    margin=dict(l=10, r=10, t=30, b=10),
+                )
+                st.plotly_chart(fig_uur_en, use_container_width=True)
 
 
     #-----Grafiek Lieke------
