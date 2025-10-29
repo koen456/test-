@@ -607,7 +607,12 @@ elif page == "🚘 Voertuigen":
             fig_cmp.update_layout(
                 barmode="group",
                 bargap=0.15,
-                title="Vergelijking per metriek",
+                title=dict(
+                text="Vergelijking per metriek",
+                font=dict(size=24),   # ← hoogte (lettergrootte)
+                x=0.5, xanchor="center",
+                y=0.98, yanchor="top" # ← optioneel: titel hoger/lager plaatsen
+                ),
                 xaxis_title="Metriek",
                 yaxis_title="Waarde",
                 legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="left", x=0),
