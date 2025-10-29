@@ -611,7 +611,7 @@ elif page == "🚘 Voertuigen":
                 text="Vergelijking per metriek",
                 font=dict(size=24),   # ← hoogte (lettergrootte)
                 x=0.5, xanchor="center",
-                y=0.98, yanchor="top" # ← optioneel: titel hoger/lager plaatsen
+                y=1, yanchor="top" # ← optioneel: titel hoger/lager plaatsen
                 ),
                 xaxis_title="Metriek",
                 yaxis_title="Waarde",
